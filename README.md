@@ -1,2 +1,2 @@
-# space-manager
+# Optimo
 interior space organiser and visualiser 
