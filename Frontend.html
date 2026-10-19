@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimo - Room Layout</title>
+<style>
+  :root { --ink:#1f2a2e; --paper:#f3f5f4; --line:#cfd8d6; --accent:#1f6f78; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Georgia, "Times New Roman", serif; background:var(--paper); color:var(--ink); }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; display:grid; gap:24px; grid-template-columns: 340px 1fr; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  h1 { grid-column: 1 / -1; margin:0; font-size: 1.8rem; }
+  h2 { font-size:1.05rem; margin:0 0 10px; }
+  .panel { background:#fff; border:1px solid var(--line); padding:16px; margin-top:16px; }
+  .panel:first-child { margin-top:0; }
+  label { display:block; font-size:.9rem; margin:8px 0 2px; }
+  input, select { width:100%; padding:7px; border:1px solid var(--line); font:inherit; background:#fff; }
+  .row { display:flex; gap:8px; }
+  .row > div { flex:1; }
+  .row[hidden] { display:none; }
+  button { font:inherit; padding:9px 14px; border:1px solid var(--ink); background:var(--ink); color:#fff; cursor:pointer; margin-top:12px; }
+  button.secondary { background:#fff; color:var(--ink); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid var(--accent); outline-offset:1px; }
+  .item { border-top:1px solid var(--line); padding:8px 0; display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:.9rem; }
+  .item button { margin:0; padding:3px 8px; }
+  #msg { margin-top:10px; font-size:.9rem; min-height:1.2em; }
+  #msg.err { color:#a3261f; }
+  .note { font-size:.8rem; opacity:.75; margin:4px 0 0; }
+
+  /* suggestion dropdown */
+  .combo { position:relative; display:flex; gap:6px; }
+  .combo button { margin:0; padding:6px 10px; }
+  #sugg { position:absolute; top:100%; left:0; right:0; margin:2px 0 0; padding:0; list-style:none;
+          background:#fff; border:1px solid var(--ink); z-index:5; max-height:210px; overflow:auto; }
+  #sugg li { padding:7px 10px; cursor:pointer; }
+  #sugg li.active, #sugg li:hover { background:#dcebea; }
+
+  /* room: every empty square, door, window and furniture box sits on this grid */
+  #room { display:grid; gap:2px; background:var(--line); border:2px solid var(--ink); width:100%; max-width:640px; user-select:none; }
+  .cell { background:#fafafa; }
+
+  /* doors and windows */
+  .zone { display:flex; align-items:center; justify-content:center; font-size:clamp(11px,2vw,20px); pointer-events:none; overflow:hidden; }
+  .zone.door   { background:repeating-linear-gradient(45deg, rgba(46,158,91,.28) 0 6px, rgba(46,158,91,.1) 6px 12px); }
+  .zone.window { background:rgba(74,168,224,.22); }
+  .edge { position:relative; z-index:2; pointer-events:none; }
+  .edge.door   { --c:#8d5a2b; --t:8px; }
+  .edge.window { --c:#4aa8e0; --t:6px; }
+  .edge.north { box-shadow:inset 0 var(--t) 0 var(--c); }
+  .edge.south { box-shadow:inset 0 calc(var(--t) * -1) 0 var(--c); }
+  .edge.west  { box-shadow:inset var(--t) 0 0 var(--c); }
+  .edge.east  { box-shadow:inset calc(var(--t) * -1) 0 0 var(--c); }
+
+  /* furniture */
+  .piece { position:relative; z-index:1; display:flex; align-items:center; justify-content:center;
+           border:3px solid; border-radius:6px; cursor:grab; touch-action:none; overflow:hidden; }
+  .piece .ico { line-height:1; pointer-events:none; }
+  .piece .badge { position:absolute; top:2px; left:2px; min-width:16px; height:16px; padding:0 4px; border-radius:8px;
+                  color:#fff; font:bold 11px/16px Georgia, serif; text-align:center; pointer-events:none; }
+  .piece.dragging { z-index:3; cursor:grabbing; box-shadow:0 6px 14px rgba(0,0,0,.35); }
+  .piece.blocked { outline:3px solid #d32f2f; outline-offset:-3px; }
+  .piece:focus-visible { outline:3px solid var(--accent); outline-offset:1px; }
+  #legend { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:14px; font-size:.9rem; }
+  .sw { display:inline-block; width:14px; height:14px; vertical-align:-2px; margin-right:6px; border:1px solid rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Optimo: room layout</h1>
+
+  <section>
+    <div class="panel">
+      <h2>Room size (feet)</h2>
+      <div class="row">
+        <div><label for="rw">Width (ft)</label><input id="rw" type="number" min="1" max="30" value="12"></div>
+        <div><label for="rh">Length (ft)</label><input id="rh" type="number" min="1" max="30" value="10"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Doors &amp; windows</h2>
+      <div class="row">
+        <div><label for="okind">Type</label>
+          <select id="okind"><option value="door">🚪 Door</option><option value="window">🪟 Window</option></select></div>
+        <div><label for="owall">Wall</label>
+          <select id="owall">
+            <option value="north">North (top)</option><option value="south">South (bottom)</option>
+            <option value="west">West (left)</option><option value="east">East (right)</option>
+          </select></div>
+      </div>
+      <div class="row">
+        <div><label for="ostart">Starts at (ft)</label><input id="ostart" type="number" min="0" value="0"></div>
+        <div><label for="olen">Width (ft)</label><input id="olen" type="number" min="1" value="3"></div>
+      </div>
+      <p class="note">North/South walls: measured from the left corner. West/East walls: from the top corner.</p>
+      <button id="addOpen">Add door / window</button>
+      <div id="openList" style="margin-top:12px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Add furniture</h2>
+
+      <label for="ftype">Furniture (type a few letters, or press the arrow)</label>
+      <div class="combo">
+        <input id="ftype" type="text" autocomplete="off" maxlength="19" placeholder="e.g. b, wa, so..." value="Bed">
+        <button type="button" id="ftoggle" class="secondary" aria-label="Show all furniture">&#9660;</button>
+        <ul id="sugg" role="listbox" hidden></ul>
+      </div>
+
+      <label for="fsize">Size</label>
+      <select id="fsize"></select>
+
+      <div class="row" id="custom" hidden>
+        <div><label for="cw">Width (ft)</label><input id="cw" type="number" min="1" value="3"></div>
+        <div><label for="ch">Depth (ft)</label><input id="ch" type="number" min="1" value="3"></div>
+      </div>
+
+      <label for="fq">Quantity</label>
+      <input id="fq" type="number" min="1" max="6" value="1">
+      <p class="note">Whole feet only. If your word is not in the list, it is added as a custom item with your own size.</p>
+
+      <button id="add">Add item</button>
+      <div id="list" style="margin-top:12px"></div>
+    </div>
+
+    <button id="go">Generate layout</button>
+    <button id="clear" class="secondary">Clear furniture</button>
+    <div id="msg" role="status"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Layout <span class="note">(each small square = 1 ft x 1 ft)</span></h2>
+    <p class="note" style="margin:0 0 6px">After generating, drag any item to move it (or click it and use the arrow keys). Items can't overlap, leave the room or block a door.</p>
+    <p class="note" style="margin:0 0 10px">🚪 Door: the shaded 1 ft strip in front must stay clear. 🪟 Window: tall items (wardrobe, bookshelf) can't block it.</p>
+    <div id="room"></div>
+    <div id="legend"></div>
+  </section>
+</main>
+
+<script>
+// ---------- Settings ----------
+const MAX_SIZE = 30, MAX_PIECES = 20;
+
+// Furniture catalog. Each size = [label, width ft, depth ft] (rounded to whole feet)
+const CATALOG = {
+  Bed:       [["Single",3,6], ["Double",5,6], ["Queen",5,7], ["King",6,7]],
+  Wardrobe:  [["Small",3,2], ["Medium",4,2], ["Large",6,2]],
+  Table:     [["Small",3,3], ["Dining",6,3]],
+  Desk:      [["Small",4,2], ["Large",5,2]],
+  Sofa:      [["2-seater",5,3], ["3-seater",7,3]],
+  Chair:     [["Standard",2,2]],
+  Bookshelf: [["Standard",3,1], ["Wide",5,1]]
+};
+const TYPES = Object.keys(CATALOG);
+const TALL = ["Wardrobe", "Bookshelf"];   // tall items may not block a window
+
+// Icons (emoji) shown on the furniture. Unknown custom items get the box icon.
+const ICONS = { Bed:"🛏️", Wardrobe:"👗", Table:"🍽️", Desk:"💻", Sofa:"🛋️", Chair:"🪑", Bookshelf:"📚" };
+const DEFAULT_ICON = "📦";
+
+// Copies of the same item get different colours (red, green, ...)
+const COPY_COLORS = [
+  ["Red","#d64545"], ["Green","#2e9e5b"], ["Blue","#3b6fd4"],
+  ["Orange","#e08a1e"], ["Purple","#8a4fc7"], ["Teal","#1f9aa8"]
+];
+const TYPE_COLOR = "#6b7b80"; // colour for items that have only one copy
+
+// ---------- State ----------
+let types = [];      // furniture added by the user: {name, w, h, qty, icon, tall}
+let openings = [     // doors and windows: {kind, wall, start, len}
+  {kind: "door",   wall: "south", start: 1, len: 3},
+  {kind: "window", wall: "north", start: 4, len: 4}
+];
+let current = null;  // the layout on screen: {rw, rh, spots, pieces, boxes, zones}
+
+// ---------- Doors & windows geometry ----------
+// The 1 ft strip just inside the room in front of an opening, as a rectangle of squares
+function zoneRect(o, rw, rh) {
+  if (o.wall === "north") return {x: o.start, y: 0,      w: o.len, h: 1};
+  if (o.wall === "south") return {x: o.start, y: rh - 1, w: o.len, h: 1};
+  if (o.wall === "west")  return {x: 0,      y: o.start, w: 1,     h: o.len};
+  return                         {x: rw - 1, y: o.start, w: 1,     h: o.len};
+}
+function fitsWall(o, rw, rh) {
+  const wallLength = (o.wall === "north" || o.wall === "south") ? rw : rh;
+  return o.start >= 0 && o.len >= 1 && o.start + o.len <= wallLength;
+}
+function makeZones(rw, rh) {
+  return openings.filter(o => fitsWall(o, rw, rh))
+                 .map(o => Object.assign({kind: o.kind}, zoneRect(o, rw, rh)));
+}
+// Doors block every item; windows block only tall items
+function hitsZone(tall, x, y, w, h, zones) {
+  return zones.some(z =>
+    (z.kind === "door" || tall) &&
+    x < z.x + z.w && z.x < x + w && y < z.y + z.h && z.y < y + h);
+}
+
+// ---------- Layout solver (backtracking) ----------
+// Returns spots[i] = {x, y, w, h} for every piece (w/h already include rotation), or null
+function solve(roomW, roomH, pieces, zones) {
+  const grid = Array.from({length: roomH}, () => Array(roomW).fill(-1));
+  const spots = [];
+
+  function canPlace(p, x, y) {
+    if (x + p.w > roomW || y + p.h > roomH) return false;
+    if (hitsZone(p.tall, x, y, p.w, p.h, zones)) return false;   // door / window rule
+    for (let i = y; i < y + p.h; i++)
+      for (let j = x; j < x + p.w; j++)
+        if (grid[i][j] !== -1) return false;
+    return true;
+  }
+  function put(p, x, y, val) {
+    for (let i = y; i < y + p.h; i++)
+      for (let j = x; j < x + p.w; j++) grid[i][j] = val;
+  }
+  function place(index) {
+    if (index === pieces.length) return true;
+    const base = pieces[index];
+    for (let rot = 0; rot < 2; rot++) {
+      const p = rot === 0 ? base : {w: base.h, h: base.w, tall: base.tall};
+      if (rot === 1 && base.w === base.h) break;
+      for (let y = 0; y < roomH; y++)
+        for (let x = 0; x < roomW; x++)
+          if (canPlace(p, x, y)) {
+            put(p, x, y, index);
+            spots[index] = {x, y, w: p.w, h: p.h};
+            if (place(index + 1)) return true;
+            put(p, x, y, -1); // backtrack
+          }
+    }
+    return false;
+  }
+  return place(0) ? spots : null;
+}
+
+// ---------- Helpers ----------
+const $ = id => document.getElementById(id);
+function say(text, err) { const m = $("msg"); m.textContent = text; m.className = err ? "err" : ""; }
+function tint(hex, a) {   // "#d64545" -> "rgba(214,69,69,a)"
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// ---------- Suggestions (autocomplete) ----------
+// Prefix matches first ("wa" -> Wardrobe), then words that merely contain the text
+function matches(text) {
+  const q = text.trim().toLowerCase();
+  if (!q) return TYPES;
+  const starts = TYPES.filter(t => t.toLowerCase().startsWith(q));
+  const has = TYPES.filter(t => !starts.includes(t) && t.toLowerCase().includes(q));
+  return starts.concat(has);
+}
+// What the typed text means: exact word, or first word that starts with it ("b" -> Bed)
+function resolve(text) {
+  const q = text.trim().toLowerCase();
+  if (!q) return null;
+  return TYPES.find(t => t.toLowerCase() === q) ||
+         TYPES.find(t => t.toLowerCase().startsWith(q)) || null;
+}
+
+let shown = [], active = 0;
+
+function openList(showAll) {
+  const text = showAll ? "" : $("ftype").value;
+  const q = text.trim();
+  shown = matches(text);
+  active = 0;
+  const ul = $("sugg");
+  ul.innerHTML = "";
+  if (shown.length === 0) { ul.hidden = true; return; }
+  shown.forEach(t => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.append(ICONS[t] + " ");
+    if (q && t.toLowerCase().startsWith(q.toLowerCase())) {
+      const b = document.createElement("b");
+      b.textContent = t.slice(0, q.length);
+      li.append(b, t.slice(q.length));
+    } else li.append(t);
+    li.onmousedown = e => { e.preventDefault(); chooseType(t); };
+    ul.appendChild(li);
+  });
+  ul.hidden = false;
+  highlight();
+}
+function highlight() {
+  Array.from($("sugg").children).forEach((li, i) => li.classList.toggle("active", i === active));
+}
+function chooseType(t) {
+  $("ftype").value = t;
+  $("sugg").hidden = true;
+  syncSizes();
+  $("ftype").focus();
+}
+
+$("ftype").oninput = () => { openList(false); syncSizes(); };
+$("ftype").onblur = () => { $("sugg").hidden = true; };
+$("ftoggle").onmousedown = e => { e.preventDefault(); $("ftype").focus(); openList(true); };
+$("ftype").onkeydown = e => {
+  const open = !$("sugg").hidden;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!open) openList(true); else { active = (active + 1) % shown.length; highlight(); }
+  } else if (e.key === "ArrowUp" && open) {
+    e.preventDefault(); active = (active - 1 + shown.length) % shown.length; highlight();
+  } else if ((e.key === "Enter" || e.key === "Tab") && open && $("ftype").value.trim()) {
+    if (e.key === "Enter") e.preventDefault();
+    chooseType(shown[active]);
+  } else if (e.key === "Escape") $("sugg").hidden = true;
+};
+
+// ---------- Size dropdown (king, queen, ... custom) ----------
+function syncSizes() {
+  const type = resolve($("ftype").value), sel = $("fsize");
+  sel.innerHTML = "";
+  if (type) CATALOG[type].forEach((s, i) => sel.add(new Option(`${s[0]} (${s[1]} x ${s[2]} ft)`, i)));
+  sel.add(new Option("Custom size", "custom"));
+  toggleCustom();
+}
+function toggleCustom() { $("custom").hidden = $("fsize").value !== "custom"; }
+$("fsize").onchange = toggleCustom;
+
+// ---------- Lists on the left ----------
+function renderList() {
+  $("list").innerHTML = "";
+  types.forEach((t, i) => {
+    const d = document.createElement("div");
+    d.className = "item";
+    const s = document.createElement("span");
+    s.textContent = `${t.icon} ${t.name} ${t.w} x ${t.h} ft, qty ${t.qty}`;   // textContent keeps typed names safe
+    const b = document.createElement("button");
+    b.className = "secondary"; b.textContent = "Remove";
+    b.onclick = () => { types.splice(i, 1); renderList(); };
+    d.append(s, b);
+    $("list").appendChild(d);
+  });
+}
+function renderOpenings() {
+  $("openList").innerHTML = "";
+  openings.forEach((o, i) => {
+    const d = document.createElement("div");
+    d.className = "item";
+    const s = document.createElement("span");
+    s.textContent = `${o.kind === "door" ? "🚪 Door" : "🪟 Window"}, ${o.wall} wall, from ${o.start} ft, ${o.len} ft wide`;
+    const b = document.createElement("button");
+    b.className = "secondary"; b.textContent = "Remove";
+    b.onclick = () => { openings.splice(i, 1); renderOpenings(); drawEmpty(); say("Removed. Click Generate layout again."); };
+    d.append(s, b);
+    $("openList").appendChild(d);
+  });
+}
+
+// ---------- Drawing the room ----------
+// The room is a CSS grid. Every empty square, door, window and furniture box is placed on it by
+// column/row, so one piece = ONE box spanning all the squares it covers.
+function setupRoom(w, h) {
+  const room = $("room");
+  room.style.gridTemplateColumns = `repeat(${w}, 1fr)`;
+  room.style.gridTemplateRows = `repeat(${h}, 1fr)`;
+  room.style.aspectRatio = `${w} / ${h}`;
+  room.innerHTML = "";
+  return room;
+}
+function placeBox(box, x, y, w, h) {
+  box.style.gridColumn = `${x + 1} / span ${w}`;
+  box.style.gridRow = `${y + 1} / span ${h}`;
+}
+function addBox(room, x, y, w, h, cls) {
+  const d = document.createElement("div");
+  d.className = cls;
+  placeBox(d, x, y, w, h);
+  room.appendChild(d);
+  return d;
+}
+
+// Empty squares + doors + windows (furniture is added on top of this)
+function drawBase(w, h) {
+  const room = setupRoom(w, h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) addBox(room, x, y, 1, 1, "cell");
+  openings.filter(o => fitsWall(o, w, h)).forEach(o => {
+    const r = zoneRect(o, w, h), name = o.kind === "door" ? "Door" : "Window";
+    const zone = addBox(room, r.x, r.y, r.w, r.h, "zone " + o.kind);   // shaded area in front
+    zone.textContent = o.kind === "door" ? "🚪" : "🪟";
+    const edge = addBox(room, r.x, r.y, r.w, r.h, `edge ${o.kind} ${o.wall}`);   // coloured strip on the wall
+    edge.title = `${name}, ${o.wall} wall, ${o.len} ft wide`;
+  });
+  return room;
+}
+
+function drawEmpty() {
+  current = null;
+  const w = Math.min(MAX_SIZE, Math.max(1, parseInt($("rw").value) || 1));
+  const h = Math.min(MAX_SIZE, Math.max(1, parseInt($("rh").value) || 1));
+  drawBase(w, h);
+  $("legend").innerHTML = "";
+}
+
+// Make the icons big enough for their box (and re-fit when the window is resized)
+function fitIcons() {
+  if (!current) return;
+  const cell = $("room").clientWidth / current.rw;
+  current.boxes.forEach((b, i) => {
+    const s = current.spots[i];
+    b.querySelector(".ico").style.fontSize = Math.max(12, Math.min(44, cell * Math.min(s.w, s.h) * 0.55)) + "px";
+  });
+}
+window.addEventListener("resize", fitIcons);
+
+function drawLayout(rw, rh, spots, pieces) {
+  const room = drawBase(rw, rh);
+  current = {rw, rh, spots, pieces, boxes: [], zones: makeZones(rw, rh)};
+
+  pieces.forEach((p, i) => {
+    const s = spots[i];
+    const box = addBox(room, s.x, s.y, s.w, s.h, "piece");
+    box.style.background = tint(p.color, 0.25);
+    box.style.borderColor = p.color;
+    box.tabIndex = 0;
+    box.setAttribute("role", "button");
+    box.setAttribute("aria-label", `${p.name}${p.copy ? " " + p.copy : ""}. Drag, or use the arrow keys, to move.`);
+    box.title = `${p.name} ${p.w} x ${p.h} ft`;
+
+    const ico = document.createElement("span");
+    ico.className = "ico"; ico.textContent = p.icon;
+    box.appendChild(ico);
+    if (p.copy) {                                   // small number only when there are several copies
+      const badge = document.createElement("span");
+      badge.className = "badge"; badge.textContent = p.copy; badge.style.background = p.color;
+      box.appendChild(badge);
+    }
+    enableDrag(box, i);
+    current.boxes.push(box);
+  });
+  fitIcons();
+
+  const legend = $("legend");
+  legend.innerHTML = "";
+  pieces.forEach(p => {
+    const span = document.createElement("span");
+    const sw = document.createElement("span");
+    sw.className = "sw"; sw.style.background = p.color;
+    span.append(sw, `${p.icon} ${p.name} ${p.w} x ${p.h} ft` + (p.copy ? ` - copy ${p.copy} (${p.colorName})` : ""));
+    legend.appendChild(span);
+  });
+}
+
+// ---------- Moving pieces: drag & drop with NO overlapping ----------
+// true if piece i can sit with its top-left at (x, y): inside the room, touching no other piece,
+// and not blocking a door (or a window, for tall items)
+function fits(i, x, y, w, h) {
+  if (x < 0 || y < 0 || x + w > current.rw || y + h > current.rh) return false;
+  if (hitsZone(current.pieces[i].tall, x, y, w, h, current.zones)) return false;
+  return current.spots.every((s, j) =>
+    j === i || x + w <= s.x || s.x + s.w <= x || y + h <= s.y || s.y + s.h <= y);
+}
+function moveTo(i, x, y) {
+  const s = current.spots[i];
+  s.x = x; s.y = y;
+  placeBox(current.boxes[i], x, y, s.w, s.h);
+}
+// Mouse/finger position -> position measured in room squares (can be fractional)
+function cellAt(e) {
+  const room = $("room"), r = room.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left - room.clientLeft) / (room.clientWidth / current.rw),
+    y: (e.clientY - r.top - room.clientTop) / (room.clientHeight / current.rh)
+  };
+}
+const BLOCKED_MSG = "Can't go there: it would overlap another item, leave the room, or block a door/window.";
+
+function enableDrag(box, i) {
+  let drag = null;
+
+  box.onpointerdown = e => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    box.setPointerCapture(e.pointerId);
+    const c = cellAt(e), s = current.spots[i];
+    drag = {dx: c.x - s.x, dy: c.y - s.y};          // where inside the piece it was grabbed
+    box.classList.add("dragging");
+  };
+
+  box.onpointermove = e => {
+    if (!drag) return;
+    const c = cellAt(e), s = current.spots[i];
+    const tx = Math.round(c.x - drag.dx), ty = Math.round(c.y - drag.dy);   // snap to the grid
+    // Try the exact spot; if it's taken, slide along one axis. The piece only ever moves to free spots.
+    const ok = [[tx, ty], [tx, s.y], [s.x, ty]].find(t => fits(i, t[0], t[1], s.w, s.h));
+    if (ok) moveTo(i, ok[0], ok[1]);
+    const exact = fits(i, tx, ty, s.w, s.h);
+    box.classList.toggle("blocked", !exact);
+    say(exact ? "" : BLOCKED_MSG, !exact);
+  };
+
+  const stop = () => { drag = null; box.classList.remove("dragging", "blocked"); say(""); };
+  box.onpointerup = stop;
+  box.onpointercancel = stop;
+
+  // Keyboard: arrow keys move the focused piece one square
+  box.onkeydown = e => {
+    const d = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const s = current.spots[i];
+    if (fits(i, s.x + d[0], s.y + d[1], s.w, s.h)) { moveTo(i, s.x + d[0], s.y + d[1]); say(""); }
+    else say(BLOCKED_MSG, true);
+  };
+}
+
+// ---------- Buttons ----------
+$("okind").onchange = () => { $("olen").value = $("okind").value === "door" ? 3 : 4; };
+
+$("addOpen").onclick = () => {
+  const rw = parseInt($("rw").value), rh = parseInt($("rh").value);
+  const o = {kind: $("okind").value, wall: $("owall").value,
+             start: parseInt($("ostart").value), len: parseInt($("olen").value)};
+  const name = o.kind === "door" ? "Door" : "Window";
+  if (!(o.start >= 0 && o.len >= 1)) return say("Start must be 0 or more and width at least 1 ft.", true);
+  if (!fitsWall(o, rw, rh)) {
+    const wallLength = (o.wall === "north" || o.wall === "south") ? rw : rh;
+    return say(`${name} doesn't fit: the ${o.wall} wall is only ${wallLength} ft long.`, true);
+  }
+  if (openings.some(p => p.wall === o.wall && o.start < p.start + p.len && p.start < o.start + o.len))
+    return say(`Another door/window is already on that part of the ${o.wall} wall.`, true);
+
+  openings.push(o);
+  renderOpenings(); drawEmpty();
+  say(`${name} added. Click Generate layout to place furniture around it.`);
+};
+
+$("add").onclick = () => {
+  const text = $("ftype").value.trim();
+  const rw = parseInt($("rw").value), rh = parseInt($("rh").value);
+  const qty = parseInt($("fq").value);
+  if (!text) return say("Type or pick a furniture name.", true);
+
+  const type = resolve(text);
+  let name, w, h;
+  if (type && $("fsize").value !== "custom") {
+    const s = CATALOG[type][+$("fsize").value];
+    name = `${type} (${s[0]})`; w = s[1]; h = s[2];
+  } else {
+    name = type ? `${type} (Custom)` : text;
+    w = parseInt($("cw").value); h = parseInt($("ch").value);
+  }
+
+  const total = types.reduce((s, t) => s + t.qty, 0);
+  if (!(w > 0 && h > 0 && qty > 0)) return say("Width, depth and quantity must be whole numbers above 0.", true);
+  if (!((w <= rw && h <= rh) || (h <= rw && w <= rh))) return say(`${name} (${w} x ${h} ft) is larger than the room.`, true);
+  if (total + qty > MAX_PIECES) return say("Too many pieces (max " + MAX_PIECES + ").", true);
+
+  types.push({name, w, h, qty, icon: type ? ICONS[type] : DEFAULT_ICON, tall: TALL.includes(type)});
+  $("ftype").value = ""; syncSizes(); $("ftype").focus();
+  say("");
+  renderList();
+};
+
+$("clear").onclick = () => { types = []; renderList(); drawEmpty(); say(""); };
+$("rw").oninput = $("rh").oninput = drawEmpty;
+
+$("go").onclick = () => {
+  const rw = parseInt($("rw").value), rh = parseInt($("rh").value);
+  if (!(rw > 0 && rh > 0 && rw <= MAX_SIZE && rh <= MAX_SIZE)) return say("Room size must be 1 to " + MAX_SIZE + " ft.", true);
+  const bad = openings.find(o => !fitsWall(o, rw, rh));
+  if (bad) return say(`The ${bad.kind} on the ${bad.wall} wall doesn't fit this room size. Remove it or make the room bigger.`, true);
+  if (types.length === 0) return say("Add at least one item.", true);
+
+  // Colours are assigned here in the frontend: copies of one item get different colours
+  const pieces = [];
+  types.forEach(t => {
+    for (let k = 0; k < t.qty; k++) {
+      pieces.push({
+        w: t.w, h: t.h, name: t.name, icon: t.icon, tall: t.tall,
+        copy: t.qty > 1 ? k + 1 : 0,
+        colorName: t.qty > 1 ? COPY_COLORS[k % COPY_COLORS.length][0] : "Grey",
+        color: t.qty > 1 ? COPY_COLORS[k % COPY_COLORS.length][1] : TYPE_COLOR
+      });
+    }
+  });
+  // Largest first: fails sooner
+  pieces.sort((a, b) => b.w * b.h - a.w * a.h);
+
+  const spots = solve(rw, rh, pieces, makeZones(rw, rh));
+  if (!spots) { drawEmpty(); return say("No valid layout found. Try a bigger room, fewer items, or move the doors/windows.", true); }
+
+  drawLayout(rw, rh, spots, pieces);
+  say("Layout found. Drag the items to rearrange them.");
+};
+
+syncSizes();
+renderOpenings();
+drawEmpty();
+</script>
+</body>
+</html>

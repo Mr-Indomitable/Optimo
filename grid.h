@@ -6,7 +6,14 @@
 using namespace std;
 
 const int MAX_SIZE = 20;
-const int MAX_FURNITURE = 10;
+const int MAX_FURNITURE = 20;
+
+// Public places (restaurant, library) may hold many tables. Gaps are measured
+// in empty cells between two items.
+//   Table to table: chair (1) + pull-out space (1) on each side = 4
+//   Library: shelf to shelf / shelf to table = a 2 cell aisle
+const int MIN_TABLE_GAP = 4;
+const int LIBRARY_AISLE = 2;
 
 class Furniture
 {
@@ -38,15 +45,34 @@ public:
     char leftWall[MAX_SIZE];    // indexed by row
     char rightWall[MAX_SIZE];   // indexed by row
 
-    // Cells just inside a door - kept free so the door can open/be used
+    // Cells in front of a door (2 deep) - kept free as walking space
     bool blocked[MAX_SIZE][MAX_SIZE];
+
+    // Room type: 0 = general, 1 = bedroom, 2 = drawing room, 3 = study,
+    //            4 = dining room, 5 = restaurant, 6 = library
+    int type;
 
     Room(int w, int h)
     {
         width = w;
         height = h;
+        type = 0;
         createEmptyGrid();
     }
+
+    const char* typeName()
+    {
+        if (type == 1) return "Bedroom";
+        if (type == 2) return "Drawing room";
+        if (type == 3) return "Study";
+        if (type == 4) return "Dining room";
+        if (type == 5) return "Restaurant";
+        if (type == 6) return "Library";
+        return "General room";
+    }
+
+    // Restaurants and libraries may have many tables
+    bool isPublic() { return type == 5 || type == 6; }
 
     int cols() { return width; }
     int rows() { return height; }
@@ -106,10 +132,27 @@ public:
 
             if (type == 'D')
             {
-                if (wall == 'T')      blocked[0][k] = true;
-                else if (wall == 'B') blocked[rows() - 1][k] = true;
-                else if (wall == 'L') blocked[k][0] = true;
-                else                  blocked[k][cols() - 1] = true;
+                // Keep the 2 cells in front of the door free (walking space)
+                if (wall == 'T')
+                {
+                    blocked[0][k] = true;
+                    if (rows() > 1) blocked[1][k] = true;
+                }
+                else if (wall == 'B')
+                {
+                    blocked[rows() - 1][k] = true;
+                    if (rows() > 1) blocked[rows() - 2][k] = true;
+                }
+                else if (wall == 'L')
+                {
+                    blocked[k][0] = true;
+                    if (cols() > 1) blocked[k][1] = true;
+                }
+                else
+                {
+                    blocked[k][cols() - 1] = true;
+                    if (cols() > 1) blocked[k][cols() - 2] = true;
+                }
             }
         }
 
